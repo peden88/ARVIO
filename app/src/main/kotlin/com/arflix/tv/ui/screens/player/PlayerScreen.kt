@@ -703,7 +703,8 @@ fun PlayerScreen(
     val bufferingTimeoutMs = 25_000L // Mid-playback timeout for stuck buffering
     var userSelectedSourceManually by remember { mutableStateOf(false) }
     val allowStartupSourceFallback = true
-    val allowMidPlaybackSourceFallback = false
+    // Only VOD can switch sources mid-playback; live channels have different timelines.
+    val allowMidPlaybackSourceFallback = !isLiveStream
     val initialBufferingTimeoutMs = remember(uiState.selectedStream, userSelectedSourceManually) {
         estimateInitialStartupTimeoutMs(
             stream = uiState.selectedStream,
@@ -961,7 +962,13 @@ fun PlayerScreen(
                 rebufferRecoverAttempted = false
                 longRebufferCount = 0
                 isAutoAdvancing = true
-                viewModel.selectStream(streams[nextIndex])
+                // Preserve the VOD timeline when recovery moves away from a source that
+                // already played successfully. Startup failover still uses the original start.
+                if (hasPlaybackStarted && !isLiveStream) {
+                    viewModel.selectStream(streams[nextIndex], exoPlayer.currentPosition.coerceAtLeast(0L))
+                } else {
+                    viewModel.selectStream(streams[nextIndex])
+                }
                 true
             }
         }
@@ -2827,7 +2834,9 @@ fun PlayerScreen(
                         viewModel.onLongRebufferDetected()
                         if (allowMidPlaybackSourceFallback &&
                             !userSelectedSourceManually &&
-                            longRebufferCount >= 1 &&
+                            // Give the existing same-source rebuffer recovery one full window
+                            // before attempting an automatic source change.
+                            rebufferRecoverAttempted && longRebufferCount >= 2 &&
                             tryAdvanceToNextStream(
                                 reason = context.getString(R.string.player_fail_buffering_slow)
                             )
