@@ -720,6 +720,13 @@ class PlayerViewModel @Inject constructor(
             holdsTelegramQuiet = true
             streamRepository.onPlaybackStarted()
         }
+        // Consume only a recent, exactly matching episode snapshot. Never reuse a
+        // previous episode's streams for a different title or season.
+        val prefetchedEpisodeStreams = if (
+            mediaType == MediaType.TV && !forceRefresh && providedStreamUrl.isNullOrBlank() &&
+            nextEpisodePrefetchKey?.startsWith("$"+"{mediaId}:"+"$"+"{seasonNumber}:"+"$"+"{episodeNumber}:") == true &&
+            System.currentTimeMillis() - nextEpisodePrefetchedAtMs in 0L..120_000L
+        ) nextEpisodePrefetchedStreams.toList() else emptyList()
         // A new episode invalidates any in-flight discovery for the previous session.
         nextEpisodePrefetchJob?.cancel()
         nextEpisodePrefetchJob = null
@@ -1573,7 +1580,7 @@ class PlayerViewModel @Inject constructor(
                     val existingVod = _uiState.value.streams.filter(::isSupplementalStream)
                     val activeStreamList = listOfNotNull(_uiState.value.selectedStream)
                     val mergedStreams = sortStreamsByQualityAndSize(
-                        (allStreams + existingVod + activeStreamList)
+                        (prefetchedEpisodeStreams + allStreams + existingVod + activeStreamList)
                             .distinctBy(::providerScopedStreamIdentity),
                         preferredLanguage
                     )
@@ -2896,6 +2903,7 @@ class PlayerViewModel @Inject constructor(
     private var nextEpisodePrefetchJob: Job? = null
     private var nextEpisodePrefetchKey: String? = null
     private var nextEpisodePrefetchedStreams: List<StreamSource> = emptyList()
+    private var nextEpisodePrefetchedAtMs: Long = 0L
 
     fun prefetchNextEpisodeStreams(next: EpisodeIdentity) {
         if (currentMediaType != MediaType.TV || currentIsLiveStreamPlayback) return
@@ -2938,6 +2946,7 @@ class PlayerViewModel @Inject constructor(
                 }.orEmpty()
                 if (nextEpisodePrefetchKey != key) return@launch
                 nextEpisodePrefetchedStreams = streams
+                nextEpisodePrefetchedAtMs = System.currentTimeMillis()
                 val candidates = sortStreamsForAutoplay(
                     eligiblePlayerAutoplayStreams(streams, autoPlayMinimumQuality, autoPlayLimits),
                     _uiState.value.preferredAudioLanguage
