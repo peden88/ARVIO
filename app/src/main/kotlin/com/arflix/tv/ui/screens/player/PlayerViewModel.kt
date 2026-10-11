@@ -2886,6 +2886,72 @@ class PlayerViewModel @Inject constructor(
             .map { it.value }
     }
 
+    // Episode-scoped discovery: never publish prefetched results to the active
+    // PlayerUiState or replace the currently playing episode's source list.
+    private var nextEpisodePrefetchJob: Job? = null
+    private var nextEpisodePrefetchKey: String? = null
+    private var nextEpisodePrefetchedStreams: List<StreamSource> = emptyList()
+
+    fun prefetchNextEpisodeStreams(next: EpisodeIdentity) {
+        if (currentMediaType != MediaType.TV || currentIsLiveStreamPlayback) return
+        val imdb = currentImdbId?.takeIf { it.isNotBlank() } ?: return
+        val key = "$"+"{currentMediaId}:"+"$"+"{next.tmdbSeason}:"+"$"+"{next.tmdbEpisode}:"+"$"+"imdb"
+        if (nextEpisodePrefetchKey == key) return
+        nextEpisodePrefetchJob?.cancel()
+        nextEpisodePrefetchKey = key
+        nextEpisodePrefetchedStreams = emptyList()
+        nextEpisodePrefetchJob = viewModelScope.launch {
+            try {
+                val addons = streamRepository.installedAddonsForSourceResolution()
+                    .filter { it.isVodStreamingAddon() }
+                val streams = withTimeoutOrNull(12_000L) {
+                    coroutineScope {
+                        addons.map { addon ->
+                            async {
+                                runCatching {
+                                    streamRepository.resolveAddonStreams(
+                                        addon = addon,
+                                        mediaType = MediaType.TV,
+                                        imdbId = imdb,
+                                        title = currentItemTitle,
+                                        year = null,
+                                        season = next.tmdbSeason,
+                                        episode = next.tmdbEpisode,
+                                        tmdbId = currentMediaId,
+                                        tvdbId = currentTvdbId,
+                                        genreIds = currentGenreIds,
+                                        originalLanguage = currentOriginalLanguage,
+                                        animeQueryOverride = null,
+                                        airDate = null,
+                                        timeoutMs = 8_000L,
+                                        nativeType = mediaRepository.addonNativeType(currentMediaId)
+                                    )
+                                }.getOrDefault(emptyList())
+                            }
+                        }.awaitAll().flatten()
+                    }
+                }.orEmpty()
+                if (nextEpisodePrefetchKey != key) return@launch
+                nextEpisodePrefetchedStreams = streams
+                val candidates = sortStreamsForAutoplay(
+                    eligiblePlayerAutoplayStreams(streams, autoPlayMinimumQuality, autoPlayLimits),
+                    _uiState.value.preferredAudioLanguage
+                ).take(2)
+                if (candidates.isNotEmpty()) {
+                    streamRepository.prewarmStreamsForPlayback(
+                        streams = candidates,
+                        limit = candidates.size,
+                        allowNetworkWarmup = true
+                    )
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.d("NextEpisodePrefetch", "Next-episode prefetch unavailable", error)
+            }
+        }
+    }
+
     fun prewarmStream(stream: StreamSource) {
         focusedStreamPrewarmJob?.cancel()
         focusedStreamPrewarmJob = viewModelScope.launch {
