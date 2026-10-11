@@ -9,4 +9,10 @@ class NextEpisodeStreamPrefetchCacheTest {
         val key = NextEpisodeStreamPrefetchKey("a", 1, 1, 1, "tt1")
         assertTrue(cache.get(key).isEmpty())
     }
+    @Test fun storesEpisodeStreams() {
+        val cache = NextEpisodeStreamPrefetchCache<String>()
+        val key = NextEpisodeStreamPrefetchKey("a", 1, 1, 1, "tt1")
+        cache.put(key, listOf("source"))
+        assertTrue(cache.get(key).isNotEmpty())
+    }
 }
