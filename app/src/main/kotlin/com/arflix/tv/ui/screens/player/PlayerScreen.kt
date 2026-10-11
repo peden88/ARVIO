@@ -1941,6 +1941,23 @@ fun PlayerScreen(
             onExitPlayer()
         }
     }
+    // Arm next-episode prefetch timing without mutating current-episode stream state.
+    val nextEpisodePrefetchEligible = shouldStartNextEpisodePrefetch(
+        positionMs = currentPosition,
+        durationMs = duration,
+        isLive = isLiveStream,
+        hasPlaybackStarted = hasPlaybackStarted,
+        hasPlaybackError = uiState.error != null,
+        autoPlayNextEpisode = uiState.autoPlayNext,
+        nextEpisodeAvailable = nextEpisodeIdentity != null &&
+            nextEpisodeAirDateResolution == NextEpisodeAirDateResolution.Allowed,
+        isCasting = isCasting,
+    )
+    LaunchedEffect(playbackEpisodeKey, nextEpisodePrefetchEligible) {
+        if (nextEpisodePrefetchEligible) {
+            android.util.Log.d("NextEpisodePrefetch", "Next episode eligible for stream prefetch")
+        }
+    }
     PlayerCompletionEffect(
         ended = currentPlaybackState == Player.STATE_ENDED,
         enabled = hasPlaybackStarted && !isLiveStream && !isCasting,
