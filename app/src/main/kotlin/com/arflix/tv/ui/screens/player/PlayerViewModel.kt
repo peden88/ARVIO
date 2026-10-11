@@ -720,6 +720,11 @@ class PlayerViewModel @Inject constructor(
             holdsTelegramQuiet = true
             streamRepository.onPlaybackStarted()
         }
+        // A new episode invalidates any in-flight discovery for the previous session.
+        nextEpisodePrefetchJob?.cancel()
+        nextEpisodePrefetchJob = null
+        nextEpisodePrefetchKey = null
+        nextEpisodePrefetchedStreams = emptyList()
         currentMediaType = mediaType
         currentMediaId = mediaId
         currentSeason = seasonNumber
@@ -2895,7 +2900,7 @@ class PlayerViewModel @Inject constructor(
     fun prefetchNextEpisodeStreams(next: EpisodeIdentity) {
         if (currentMediaType != MediaType.TV || currentIsLiveStreamPlayback) return
         val imdb = currentImdbId?.takeIf { it.isNotBlank() } ?: return
-        val key = "$"+"{currentMediaId}:"+"$"+"{next.tmdbSeason}:"+"$"+"{next.tmdbEpisode}:"+"$"+"imdb"
+        val key = "${currentMediaId}:${next.tmdbSeason}:${next.tmdbEpisode}:$imdb"
         if (nextEpisodePrefetchKey == key) return
         nextEpisodePrefetchJob?.cancel()
         nextEpisodePrefetchKey = key
