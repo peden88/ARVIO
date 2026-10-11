@@ -720,18 +720,12 @@ class PlayerViewModel @Inject constructor(
             holdsTelegramQuiet = true
             streamRepository.onPlaybackStarted()
         }
-        // Consume only a recent, exactly matching episode snapshot. Never reuse a
-        // previous episode's streams for a different title or season.
-        val prefetchedEpisodeStreams = if (
-            mediaType == MediaType.TV && !forceRefresh && providedStreamUrl.isNullOrBlank() &&
-            nextEpisodePrefetchKey?.startsWith("$"+"{mediaId}:"+"$"+"{seasonNumber}:"+"$"+"{episodeNumber}:") == true &&
-            System.currentTimeMillis() - nextEpisodePrefetchedAtMs in 0L..120_000L
-        ) nextEpisodePrefetchedStreams.toList() else emptyList()
+        // The next player instance reads the episode-scoped handoff snapshot
+        // after resolving its canonical stream ID.
         // A new episode invalidates any in-flight discovery for the previous session.
         nextEpisodePrefetchJob?.cancel()
         nextEpisodePrefetchJob = null
         nextEpisodePrefetchKey = null
-        nextEpisodePrefetchedStreams = emptyList()
         currentMediaType = mediaType
         currentMediaId = mediaId
         currentSeason = seasonNumber
@@ -1237,6 +1231,21 @@ class PlayerViewModel @Inject constructor(
                     mediaRepository.cacheImdbId(mediaType, mediaId, imdbId)
                 }
                 currentImdbId = imdbId
+                val prefetchedEpisodeStreams = if (
+                    mediaType == MediaType.TV && !forceRefresh &&
+                    providedStreamUrl.isNullOrBlank() && !isLiveStreamPlayback &&
+                    seasonNumber != null && episodeNumber != null
+                ) {
+                    NextEpisodeStreamPrefetchStore.get(
+                        NextEpisodeStreamPrefetchKey(
+                            profileId = profileManager.getProfileIdSync(),
+                            mediaId = mediaId,
+                            season = seasonNumber,
+                            episode = episodeNumber,
+                            imdbId = effectiveStreamId,
+                        )
+                    )
+                } else emptyList()
                 // Never block source loading on title hydration from TMDB.
                 // Fetch skip intervals in background. This should never block playback.
                 launch {
@@ -2901,18 +2910,21 @@ class PlayerViewModel @Inject constructor(
     // Episode-scoped discovery: never publish prefetched results to the active
     // PlayerUiState or replace the currently playing episode's source list.
     private var nextEpisodePrefetchJob: Job? = null
-    private var nextEpisodePrefetchKey: String? = null
-    private var nextEpisodePrefetchedStreams: List<StreamSource> = emptyList()
-    private var nextEpisodePrefetchedAtMs: Long = 0L
+    private var nextEpisodePrefetchKey: NextEpisodeStreamPrefetchKey? = null
 
     fun prefetchNextEpisodeStreams(next: EpisodeIdentity) {
         if (currentMediaType != MediaType.TV || currentIsLiveStreamPlayback) return
         val imdb = currentImdbId?.takeIf { it.isNotBlank() } ?: return
-        val key = "${currentMediaId}:${next.tmdbSeason}:${next.tmdbEpisode}:$imdb"
+        val key = NextEpisodeStreamPrefetchKey(
+            profileId = profileManager.getProfileIdSync(),
+            mediaId = currentMediaId,
+            season = next.tmdbSeason,
+            episode = next.tmdbEpisode,
+            imdbId = imdb,
+        )
         if (nextEpisodePrefetchKey == key) return
         nextEpisodePrefetchJob?.cancel()
         nextEpisodePrefetchKey = key
-        nextEpisodePrefetchedStreams = emptyList()
         nextEpisodePrefetchJob = viewModelScope.launch {
             try {
                 val addons = streamRepository.installedAddonsForSourceResolution()
@@ -2944,9 +2956,9 @@ class PlayerViewModel @Inject constructor(
                         }.awaitAll().flatten()
                     }
                 }.orEmpty()
-                if (nextEpisodePrefetchKey != key) return@launch
-                nextEpisodePrefetchedStreams = streams
-                nextEpisodePrefetchedAtMs = System.currentTimeMillis()
+                if (nextEpisodePrefetchKey != key ||
+                    profileManager.getProfileIdSync() != key.profileId) return@launch
+                NextEpisodeStreamPrefetchStore.put(key, streams)
                 val candidates = sortStreamsForAutoplay(
                     eligiblePlayerAutoplayStreams(streams, autoPlayMinimumQuality, autoPlayLimits),
                     _uiState.value.preferredAudioLanguage
