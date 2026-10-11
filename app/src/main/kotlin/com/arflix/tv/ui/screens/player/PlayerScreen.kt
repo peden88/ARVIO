@@ -1955,7 +1955,7 @@ fun PlayerScreen(
     )
     LaunchedEffect(playbackEpisodeKey, nextEpisodePrefetchEligible) {
         if (nextEpisodePrefetchEligible) {
-            android.util.Log.d("NextEpisodePrefetch", "Next episode eligible for stream prefetch")
+            nextEpisodeIdentity?.let(viewModel::prefetchNextEpisodeStreams)
         }
     }
     PlayerCompletionEffect(
