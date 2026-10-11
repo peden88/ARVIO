@@ -1343,6 +1343,18 @@ fun PlayerScreen(
                                 playWhenReady = wasPlaying
                                 return
                             }
+                            // Once the bounded same-source retry ladder is exhausted, switch
+                            // only VOD autoplay sources. Preserve the current position via
+                            // tryAdvanceToNextStream; never switch live or manual selections.
+                            if (isTransientError &&
+                                allowMidPlaybackSourceFallback &&
+                                !userSelectedSourceManually &&
+                                tryAdvanceToNextStream(
+                                    reason = classifyPlaybackFailure(context, error)
+                                )
+                            ) {
+                                return
+                            }
                         }
 
                         // Source/decoder/network errors on startup should fail over to another source.
@@ -2295,6 +2307,8 @@ fun PlayerScreen(
             playbackIssueReported = false
             rebufferRecoverAttempted = false
             longRebufferCount = 0
+            // Retry budget belongs to the source, not the whole playback session.
+            midPlaybackRecoveryAttempts = 0
             ArflixApplication.trimImageMemory()
 
             val streamHeaders = uiState.selectedStream
