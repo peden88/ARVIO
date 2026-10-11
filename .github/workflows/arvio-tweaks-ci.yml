@@ -23,9 +23,12 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
-      - uses: android-actions/setup-android@v3
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses >/dev/null || true
+      # GitHub's Ubuntu Android runner already supplies the Android SDK.
+      # setup-android@v3 currently requests the retired SDK 'tools' package.
+      - name: Verify Android SDK
+        run: |
+          test -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager" --version || true
       - name: Gradle build and unit tests
         run: bash ./gradlew :app:assembleSideloadDebug :app:testSideloadDebugUnitTest --stacktrace --no-daemon
       - name: Upload test APK and reports
