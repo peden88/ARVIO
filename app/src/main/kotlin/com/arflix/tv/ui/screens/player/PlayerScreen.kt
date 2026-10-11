@@ -906,6 +906,7 @@ fun PlayerScreen(
     fun tryAdvanceToNextStream(
         skipAddonId: String? = null,
         recordCurrentFailure: Boolean = true,
+        resumePositionMs: Long? = null,
         reason: String = context.getString(R.string.player_fail_source_didnt_start)
     ): Boolean {
         val streams = uiState.streams
@@ -965,7 +966,7 @@ fun PlayerScreen(
                 // Preserve the VOD timeline when recovery moves away from a source that
                 // already played successfully. Startup failover still uses the original start.
                 if (hasPlaybackStarted && !isLiveStream) {
-                    viewModel.selectStream(streams[nextIndex], exoPlayer.currentPosition.coerceAtLeast(0L))
+                    viewModel.selectStream(streams[nextIndex], (resumePositionMs ?: 0L).coerceAtLeast(0L))
                 } else {
                     viewModel.selectStream(streams[nextIndex])
                 }
@@ -1350,6 +1351,7 @@ fun PlayerScreen(
                                 allowMidPlaybackSourceFallback &&
                                 !userSelectedSourceManually &&
                                 tryAdvanceToNextStream(
+                                    resumePositionMs = currentPosition,
                                     reason = classifyPlaybackFailure(context, error)
                                 )
                             ) {
@@ -2852,6 +2854,7 @@ fun PlayerScreen(
                             // before attempting an automatic source change.
                             rebufferRecoverAttempted && longRebufferCount >= 2 &&
                             tryAdvanceToNextStream(
+                                resumePositionMs = exoPlayer.currentPosition,
                                 reason = context.getString(R.string.player_fail_buffering_slow)
                             )
                         ) {
