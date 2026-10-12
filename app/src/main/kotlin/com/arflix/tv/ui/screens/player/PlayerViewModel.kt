@@ -2933,7 +2933,7 @@ class PlayerViewModel @Inject constructor(
                     coroutineScope {
                         addons.map { addon ->
                             async {
-                                runCatching {
+                                try {
                                     streamRepository.resolveAddonStreams(
                                         addon = addon,
                                         mediaType = MediaType.TV,
@@ -2951,16 +2951,21 @@ class PlayerViewModel @Inject constructor(
                                         timeoutMs = 8_000L,
                                         nativeType = mediaRepository.addonNativeType(currentMediaId)
                                     )
-                                }.getOrDefault(emptyList())
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    emptyList()
+                                }
                             }
                         }.awaitAll().flatten()
                     }
                 }.orEmpty()
                 if (nextEpisodePrefetchKey != key ||
                     profileManager.getProfileIdSync() != key.profileId) return@launch
-                NextEpisodeStreamPrefetchStore.put(key, sanitizeNextEpisodePrefetchedStreams(streams))
+                val safeStreams = sanitizeNextEpisodePrefetchedStreams(streams)
+                NextEpisodeStreamPrefetchStore.put(key, safeStreams)
                 val candidates = sortStreamsForAutoplay(
-                    eligiblePlayerAutoplayStreams(streams, autoPlayMinimumQuality, autoPlayLimits),
+                    eligiblePlayerAutoplayStreams(safeStreams, autoPlayMinimumQuality, autoPlayLimits),
                     _uiState.value.preferredAudioLanguage
                 ).take(2)
                 if (candidates.isNotEmpty()) {
