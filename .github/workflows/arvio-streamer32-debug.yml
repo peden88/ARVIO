@@ -108,7 +108,7 @@ jobs:
             echo '## Google TV Streamer debug APK'
             echo
             printf 'Download: [APK and verification files](%s)\n\n' "$ARTIFACT_URL"
-            printf 'Source commit: `%s`\n\n' "$(cat artifacts/source-commit.txt)"
+            printf 'Source commit: %s\n\n' "$(cat artifacts/source-commit.txt)"
             echo '- Build: sideload debug, armeabi-v7a only, Discord SDK disabled.'
             echo '- Signed with the Android debug key; no release-signing secrets required.'
             echo '- Uses the repository default runtime configuration; API-dependent features may need credentials.'
