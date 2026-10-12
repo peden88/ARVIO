@@ -55,7 +55,8 @@ val downloadSherpaOnnx = tasks.register("downloadSherpaOnnx") {
 }
 
 val discordSdkAar = layout.projectDirectory.file("libs/discord_partner_sdk.aar").asFile
-val hasDiscordSdk = discordSdkAar.isFile
+val streamer32Only = providers.gradleProperty("streamer32Only").orNull == "true"
+val hasDiscordSdk = discordSdkAar.isFile && !streamer32Only
 val includeX86Abis = providers.gradleProperty("includeX86Abis")
     .orNull
     ?.toBooleanStrictOrNull() == true
@@ -114,8 +115,9 @@ android {
         // emulator support with -PincludeX86Abis=true without changing this file.
         ndk {
             abiFilters += buildList {
-                addAll(listOf("armeabi-v7a", "arm64-v8a"))
-                if (includeX86Abis) {
+                add("armeabi-v7a")
+                if (!streamer32Only) add("arm64-v8a")
+                if (includeX86Abis && !streamer32Only) {
                     addAll(listOf("x86", "x86_64"))
                 }
             }
@@ -179,6 +181,12 @@ android {
 
     buildTypes {
         release {
+            // Streamer-specific release must never silently use the debug certificate.
+            if (streamer32Only) {
+                check(signingConfigs.findByName("release")?.storeFile != null) {
+                    "Streamer release requires keystore.properties and a real release keystore"
+                }
+            }
             // Full release optimization for TV smoothness.
             isMinifyEnabled = true
             isShrinkResources = true
