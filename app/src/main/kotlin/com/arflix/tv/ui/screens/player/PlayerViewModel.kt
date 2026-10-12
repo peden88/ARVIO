@@ -2943,6 +2943,8 @@ class PlayerViewModel @Inject constructor(
         val prefetchAutoplayLimits = autoPlayLimits
         val prefetchAudioLanguage = _uiState.value.preferredAudioLanguage
         val prefetchNativeType = mediaRepository.addonNativeType(key.mediaId)
+        val prefetchSeason = key.season
+        val prefetchEpisode = key.episode
         nextEpisodePrefetchJob = viewModelScope.launch {
             try {
                 val addons = streamRepository.installedAddonsForSourceResolution()
@@ -2997,11 +2999,18 @@ class PlayerViewModel @Inject constructor(
                 if (nextEpisodePrefetchKey != key ||
                     profileManager.getProfileIdSync() != key.profileId) return@launch
                 if (candidates.isNotEmpty()) {
-                    streamRepository.prewarmStreamsForPlayback(
-                        streams = candidates,
-                        limit = candidates.size,
-                        allowNetworkWarmup = true
-                    )
+                    try {
+                        streamRepository.prewarmStreamsForPlayback(
+                            streams = candidates,
+                            limit = candidates.size,
+                            allowNetworkWarmup = true
+                        )
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        // Warmup is best-effort; preserve the successfully cached handoff.
+                        Log.d("NextEpisodePrefetch", "Next-episode stream warmup unavailable", error)
+                    }
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
