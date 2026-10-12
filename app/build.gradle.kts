@@ -181,12 +181,6 @@ android {
 
     buildTypes {
         release {
-            // Streamer-specific release must never silently use the debug certificate.
-            if (streamer32Only) {
-                check(signingConfigs.findByName("release")?.storeFile != null) {
-                    "Streamer release requires keystore.properties and a real release keystore"
-                }
-            }
             // Full release optimization for TV smoothness.
             isMinifyEnabled = true
             isShrinkResources = true
@@ -576,6 +570,13 @@ fun escapeBuildConfigString(value: String): String =
 
 val validateReleaseCloudSecrets = tasks.register("validateReleaseCloudSecrets") {
     doLast {
+        // Gradle configures release variants even for assembleSideloadDebug.
+        // Check release signing only when a release/staging build is requested.
+        if (streamer32Only) {
+            check(android.signingConfigs.getByName("release").storeFile?.isFile == true) {
+                "Streamer release requires keystore.properties and a real release keystore"
+            }
+        }
         val appAnonKey = localSecretValue("APP_ANON_KEY").ifBlank { localSecretValue("SUPABASE_ANON_KEY") }
         val supabaseUrl = localSecretValue("SUPABASE_URL")
         val traktClientId = localSecretValue("TRAKT_CLIENT_ID")
@@ -681,5 +682,6 @@ dependencies {
     add("sideloadImplementation", "org.mozilla:rhino:1.8.1")
     add("sideloadImplementation", "com.google.re2j:re2j:1.8")
 }
+
 
 

@@ -1,0 +1,117 @@
+name: ARVIO Google TV Streamer Debug APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Branch, tag, or commit to build (leave ARVIO/tweaks for the current test build)'
+        required: true
+        default: 'ARVIO/tweaks'
+        type: string
+  push:
+    branches:
+      - 'ARVIO/tweaks'
+    paths:
+      - 'app/**'
+      - 'benchmark/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'secrets.defaults.properties'
+      - '.github/workflows/arvio-streamer32-debug.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: streamer32-debug-${{ github.event_name }}-${{ inputs.source_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug-apk:
+    name: Build and verify 32-bit debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Prepare debug configuration
+        run: |
+          cp secrets.defaults.properties secrets.properties
+          test -d "$ANDROID_HOME"
+          mkdir -p artifacts
+          git rev-parse HEAD > artifacts/source-commit.txt
+
+      - name: Build 32-bit sideload debug APK
+        run: >-
+          bash ./gradlew :app:assembleSideloadDebug
+          -Pstreamer32Only=true --stacktrace --no-daemon
+
+      - name: Verify debug APK and native ABI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import zipfile
+
+          apks = list(Path('app/build/outputs/apk/sideload/debug').glob('*.apk'))
+          if len(apks) != 1:
+              raise SystemExit(f'Expected exactly one debug APK, found {len(apks)}')
+          with zipfile.ZipFile(apks[0]) as apk:
+              native_files = [name for name in apk.namelist() if name.startswith('lib/') and name.endswith('.so')]
+              abis = {name.split('/')[1] for name in native_files}
+              if abis != {'armeabi-v7a'}:
+                  raise SystemExit(f'Unexpected native ABIs: {sorted(abis)}')
+              if any('discord' in name.lower() for name in native_files):
+                  raise SystemExit('Unexpected Discord native library in Streamer debug APK')
+          print(f'Verified native ABIs: {sorted(abis)}')
+          shutil.copy2(apks[0], 'artifacts/ARVIO-Google-TV-Streamer-32bit-debug.apk')
+          PY
+          apk_path=artifacts/ARVIO-Google-TV-Streamer-32bit-debug.apk
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          test -n "$build_tools"
+          "$build_tools/apksigner" verify --verbose --print-certs "$apk_path" | tee artifacts/signature.txt
+          "$build_tools/aapt" dump badging "$apk_path" > artifacts/apk-info.txt
+          grep '^application-debuggable' artifacts/apk-info.txt
+          grep -E '^package:|^native-code:' artifacts/apk-info.txt
+          (
+            cd artifacts
+            sha256sum ARVIO-Google-TV-Streamer-32bit-debug.apk > SHA256SUMS.txt
+          )
+
+      - name: Upload Google TV Streamer debug APK
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: arvio-google-tv-streamer-32bit-debug-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Write download instructions
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          {
+            echo '## Google TV Streamer debug APK'
+            echo
+            printf 'Download: [APK and verification files](%s)\n\n' "$ARTIFACT_URL"
+            printf 'Source commit: `%s`\n\n' "$(cat artifacts/source-commit.txt)"
+            echo '- Build: sideload debug, armeabi-v7a only, Discord SDK disabled.'
+            echo '- Signed with the Android debug key; no release-signing secrets required.'
+            echo '- Uses the repository default runtime configuration; API-dependent features may need credentials.'
+            echo '- Extract the ZIP and install ARVIO-Google-TV-Streamer-32bit-debug.apk.'
+            echo '- An existing ARVIO install signed with a different key cannot be updated by this test APK.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -30,10 +30,10 @@ jobs:
           KEY_ALIAS: ${{ secrets.ARVIO_RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ARVIO_RELEASE_KEY_PASSWORD }}
         run: |
-          test -n "$KEYSTORE_BASE64" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD" || {
+          if [[ -z "$KEYSTORE_BASE64" || -z "$STORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
             echo "::error::Release signing requires four ARVIO_RELEASE_* GitHub Actions secrets"
             exit 1
-          }
+          fi
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/arvio-release.jks"
           {
             echo "storeFile=$RUNNER_TEMP/arvio-release.jks"
@@ -64,3 +64,4 @@ jobs:
           name: arvio-google-tv-streamer-32bit-release
           path: app/build/outputs/apk/sideload/release/*.apk
           if-no-files-found: error
+
