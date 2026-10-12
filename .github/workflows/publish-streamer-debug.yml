@@ -1,0 +1,98 @@
+name: Publish Streamer debug APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful Streamer debug build run ID'
+        required: true
+        default: '38257124070'
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-streamer-debug.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-streamer-debug-${{ inputs.run_id || '38257124070' }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id || '38257124070' }}
+    steps:
+      - name: Verify source build
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > source-run.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run = json.loads(Path('source-run.json').read_text())
+          assert run['conclusion'] == 'success', 'Source build must be successful'
+          assert run['path'] == '.github/workflows/arvio-streamer32-debug.yml'
+          assert run['head_repository']['full_name'] == os.environ['GITHUB_REPOSITORY']
+          assert run['head_branch'] == 'ARVIO/tweaks', 'Only publish the reviewed tweaks branch'
+          PY
+
+      - name: Download and verify existing APK
+        run: |
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "arvio-google-tv-streamer-32bit-debug-$RUN_ID" --dir artifact
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('artifact')
+          name = 'ARVIO-Google-TV-Streamer-32bit-debug.apk'
+          run = json.loads(Path('source-run.json').read_text())
+          assert (root / 'source-commit.txt').read_text().strip() == run['head_sha']
+          expected, recorded_name = (root / 'SHA256SUMS.txt').read_text().strip().split()
+          assert recorded_name == name
+          digest = hashlib.sha256((root / name).read_bytes()).hexdigest()
+          assert digest == expected, 'APK checksum mismatch'
+          print('Verified original APK SHA-256:', digest)
+          PY
+          cp artifact/ARVIO-Google-TV-Streamer-32bit-debug.apk ARVIO.apk
+          sha256sum ARVIO.apk > ARVIO.apk.sha256
+
+      - name: Publish standalone APK
+        run: |
+          release_tag="debug-$RUN_ID"
+          source_sha=$(jq -r '.head_sha' source-run.json)
+          {
+            echo 'Google TV Streamer (4K) test APK: armeabi-v7a only, debug signed, Discord disabled.'
+            echo
+            echo 'Download ARVIO.apk directly in Downloader or a browser on the Streamer.'
+            echo 'This is the original verified Actions APK, extracted without rebuilding or changing its signature.'
+            echo 'Runtime configuration uses repository defaults; API-dependent integrations may need credentials.'
+            echo
+            printf 'Source commit: %s\n' "$source_sha"
+            printf 'Build: https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$RUN_ID"
+          } > release-notes.md
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            existing_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" --jq '.object.sha')
+            test "$existing_sha" = "$source_sha"
+          else
+            gh release create "$release_tag" ARVIO.apk ARVIO.apk.sha256 \
+              --repo "$GITHUB_REPOSITORY" --target "$source_sha" \
+              --title "Google TV Streamer debug APK - $RUN_ID" \
+              --notes-file release-notes.md --prerelease --latest=false
+          fi
+          direct_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag/ARVIO.apk"
+          # No Authorization header: verify this URL works without a GitHub login.
+          curl --fail --location --retry 3 --retry-all-errors --output downloaded.apk "$direct_url"
+          cmp ARVIO.apk downloaded.apk
+          printf 'Direct APK download: %s\n' "$direct_url"
+          printf '[Download APK directly](%s)\n' "$direct_url" >> "$GITHUB_STEP_SUMMARY"
