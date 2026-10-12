@@ -2942,6 +2942,7 @@ class PlayerViewModel @Inject constructor(
         val prefetchAutoplayQuality = autoPlayMinimumQuality
         val prefetchAutoplayLimits = autoPlayLimits
         val prefetchAudioLanguage = _uiState.value.preferredAudioLanguage
+        val prefetchNativeType = mediaRepository.addonNativeType(key.mediaId)
         nextEpisodePrefetchJob = viewModelScope.launch {
             try {
                 val addons = streamRepository.installedAddonsForSourceResolution()
@@ -2966,7 +2967,7 @@ class PlayerViewModel @Inject constructor(
                                         animeQueryOverride = null,
                                         airDate = null,
                                         timeoutMs = 8_000L,
-                                        nativeType = mediaRepository.addonNativeType(key.mediaId)
+                                        nativeType = prefetchNativeType
                                     )
                                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                                     throw cancelled
@@ -2983,6 +2984,9 @@ class PlayerViewModel @Inject constructor(
                 // Cache only successful discoveries. Empty/invalid responses should not
                 // suppress a later retry when addons recover.
                 if (safeStreams.isEmpty()) return@launch
+                // Recheck identity after sanitization, before publishing a handoff.
+                if (nextEpisodePrefetchKey != key ||
+                    profileManager.getProfileIdSync() != key.profileId) return@launch
                 NextEpisodeStreamPrefetchStore.put(key, safeStreams)
                 val candidates = sortStreamsForAutoplay(
                     eligiblePlayerAutoplayStreams(safeStreams, prefetchAutoplayQuality, prefetchAutoplayLimits),
