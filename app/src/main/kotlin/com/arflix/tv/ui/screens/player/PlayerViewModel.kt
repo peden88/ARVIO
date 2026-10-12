@@ -2925,6 +2925,18 @@ class PlayerViewModel @Inject constructor(
         if (nextEpisodePrefetchKey == key) return
         nextEpisodePrefetchJob?.cancel()
         nextEpisodePrefetchKey = key
+        // A recent matching handoff is already available to the next player instance.
+        // Do not query the same addons again on recomposition or player recreation.
+        if (NextEpisodeStreamPrefetchStore.get(key).isNotEmpty()) {
+            nextEpisodePrefetchJob = null
+            return
+        }
+        // Snapshot the currently playing title's metadata before suspending: navigating
+        // away must never make this speculative request target another title.
+        val prefetchTitle = currentItemTitle
+        val prefetchTvdbId = currentTvdbId
+        val prefetchGenreIds = currentGenreIds
+        val prefetchLanguage = currentOriginalLanguage
         nextEpisodePrefetchJob = viewModelScope.launch {
             try {
                 val addons = streamRepository.installedAddonsForSourceResolution()
@@ -2938,18 +2950,18 @@ class PlayerViewModel @Inject constructor(
                                         addon = addon,
                                         mediaType = MediaType.TV,
                                         imdbId = imdb,
-                                        title = currentItemTitle,
+                                        title = prefetchTitle,
                                         year = null,
                                         season = next.tmdbSeason,
                                         episode = next.tmdbEpisode,
-                                        tmdbId = currentMediaId,
-                                        tvdbId = currentTvdbId,
-                                        genreIds = currentGenreIds,
-                                        originalLanguage = currentOriginalLanguage,
+                                        tmdbId = key.mediaId,
+                                        tvdbId = prefetchTvdbId,
+                                        genreIds = prefetchGenreIds,
+                                        originalLanguage = prefetchLanguage,
                                         animeQueryOverride = null,
                                         airDate = null,
                                         timeoutMs = 8_000L,
-                                        nativeType = mediaRepository.addonNativeType(currentMediaId)
+                                        nativeType = mediaRepository.addonNativeType(key.mediaId)
                                     )
                                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                                     throw cancelled
