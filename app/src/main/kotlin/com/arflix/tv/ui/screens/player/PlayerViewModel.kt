@@ -720,6 +720,12 @@ class PlayerViewModel @Inject constructor(
             holdsTelegramQuiet = true
             streamRepository.onPlaybackStarted()
         }
+        // The next player instance reads the episode-scoped handoff snapshot
+        // after resolving its canonical stream ID.
+        // A new episode invalidates any in-flight discovery for the previous session.
+        nextEpisodePrefetchJob?.cancel()
+        nextEpisodePrefetchJob = null
+        nextEpisodePrefetchKey = null
         currentMediaType = mediaType
         currentMediaId = mediaId
         currentSeason = seasonNumber
@@ -1225,6 +1231,21 @@ class PlayerViewModel @Inject constructor(
                     mediaRepository.cacheImdbId(mediaType, mediaId, imdbId)
                 }
                 currentImdbId = imdbId
+                val prefetchedEpisodeStreams = if (
+                    mediaType == MediaType.TV && !forceRefresh &&
+                    providedStreamUrl.isNullOrBlank() && !isLiveStreamPlayback &&
+                    seasonNumber != null && episodeNumber != null
+                ) {
+                    NextEpisodeStreamPrefetchStore.get(
+                        NextEpisodeStreamPrefetchKey(
+                            profileId = profileManager.getProfileIdSync(),
+                            mediaId = mediaId,
+                            season = seasonNumber,
+                            episode = episodeNumber,
+                            imdbId = effectiveStreamId,
+                        )
+                    )
+                } else emptyList()
                 // Never block source loading on title hydration from TMDB.
                 // Fetch skip intervals in background. This should never block playback.
                 launch {
@@ -1568,7 +1589,7 @@ class PlayerViewModel @Inject constructor(
                     val existingVod = _uiState.value.streams.filter(::isSupplementalStream)
                     val activeStreamList = listOfNotNull(_uiState.value.selectedStream)
                     val mergedStreams = sortStreamsByQualityAndSize(
-                        (allStreams + existingVod + activeStreamList)
+                        (sanitizeNextEpisodePrefetchedStreams(prefetchedEpisodeStreams) + allStreams + existingVod + activeStreamList)
                             .distinctBy(::providerScopedStreamIdentity),
                         preferredLanguage
                     )
@@ -2884,6 +2905,119 @@ class PlayerViewModel @Inject constructor(
                     }
             )
             .map { it.value }
+    }
+
+    // Episode-scoped discovery: never publish prefetched results to the active
+    // PlayerUiState or replace the currently playing episode's source list.
+    private var nextEpisodePrefetchJob: Job? = null
+    private var nextEpisodePrefetchKey: NextEpisodeStreamPrefetchKey? = null
+
+    fun prefetchNextEpisodeStreams(next: EpisodeIdentity) {
+        if (currentMediaType != MediaType.TV || currentIsLiveStreamPlayback) return
+        val imdb = currentImdbId?.takeIf { it.isNotBlank() } ?: return
+        val key = NextEpisodeStreamPrefetchKey(
+            profileId = profileManager.getProfileIdSync(),
+            mediaId = currentMediaId,
+            season = next.tmdbSeason,
+            episode = next.tmdbEpisode,
+            imdbId = imdb,
+        )
+        // Only suppress an already-running request. A completed empty or failed
+        // request must be eligible for retry if the user returns to the episode.
+        if (nextEpisodePrefetchKey == key && nextEpisodePrefetchJob?.isActive == true) return
+        nextEpisodePrefetchJob?.cancel()
+        nextEpisodePrefetchKey = key
+        // A recent matching handoff is already available to the next player instance.
+        // Do not query the same addons again on recomposition or player recreation.
+        if (NextEpisodeStreamPrefetchStore.get(key).isNotEmpty()) {
+            nextEpisodePrefetchJob = null
+            return
+        }
+        // Snapshot the currently playing title's metadata before suspending: navigating
+        // away must never make this speculative request target another title.
+        val prefetchTitle = currentItemTitle
+        val prefetchTvdbId = currentTvdbId
+        val prefetchGenreIds = currentGenreIds
+        val prefetchLanguage = currentOriginalLanguage
+        val prefetchAutoplayQuality = autoPlayMinimumQuality
+        val prefetchAutoplayLimits = autoPlayLimits
+        val prefetchAudioLanguage = _uiState.value.preferredAudioLanguage
+        val prefetchNativeType = mediaRepository.addonNativeType(key.mediaId)
+        val prefetchSeason = key.season
+        val prefetchEpisode = key.episode
+        nextEpisodePrefetchJob = viewModelScope.launch {
+            try {
+                val addons = streamRepository.installedAddonsForSourceResolution()
+                    .filter { it.isVodStreamingAddon() }
+                val streams = withTimeoutOrNull(12_000L) {
+                    // Supervise addon requests individually: a failure from one provider
+                    // must not cancel successful results from the others.
+                    kotlinx.coroutines.supervisorScope {
+                        addons.map { addon ->
+                            async {
+                                try {
+                                    streamRepository.resolveAddonStreams(
+                                        addon = addon,
+                                        mediaType = MediaType.TV,
+                                        imdbId = imdb,
+                                        title = prefetchTitle,
+                                        year = null,
+                                        season = next.tmdbSeason,
+                                        episode = next.tmdbEpisode,
+                                        tmdbId = key.mediaId,
+                                        tvdbId = prefetchTvdbId,
+                                        genreIds = prefetchGenreIds,
+                                        originalLanguage = prefetchLanguage,
+                                        animeQueryOverride = null,
+                                        airDate = null,
+                                        timeoutMs = 8_000L,
+                                        nativeType = prefetchNativeType
+                                    )
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    emptyList()
+                                }
+                            }
+                        }.awaitAll().flatten()
+                    }
+                }.orEmpty()
+                val safeStreams = sanitizeNextEpisodePrefetchedStreams(streams)
+                // Cache only successful discoveries. Empty/invalid responses should not
+                // suppress a later retry when addons recover.
+                if (safeStreams.isEmpty()) return@launch
+                // Recheck identity after sanitization, before publishing a handoff.
+                if (nextEpisodePrefetchKey != key ||
+                    profileManager.getProfileIdSync() != key.profileId) return@launch
+                NextEpisodeStreamPrefetchStore.put(key, safeStreams)
+                val candidates = sortStreamsForAutoplay(
+                    eligiblePlayerAutoplayStreams(safeStreams, prefetchAutoplayQuality, prefetchAutoplayLimits),
+                    prefetchAudioLanguage
+                ).take(2)
+                // Publishing a handoff is sufficient even if warmup fails. Avoid warming
+                // an episode after navigation or a profile switch.
+                if (nextEpisodePrefetchKey != key ||
+                    profileManager.getProfileIdSync() != key.profileId) return@launch
+                if (candidates.isNotEmpty()) {
+                    try {
+                        streamRepository.prewarmStreamsForPlayback(
+                            streams = candidates,
+                            limit = candidates.size,
+                            allowNetworkWarmup = true
+                        )
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        // Warmup is best-effort; preserve the successfully cached handoff.
+                        Log.d("NextEpisodePrefetch", "Next-episode stream warmup unavailable", error)
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.d("NextEpisodePrefetch", "Next-episode prefetch unavailable", error)
+            }
+        }
     }
 
     fun prewarmStream(stream: StreamSource) {

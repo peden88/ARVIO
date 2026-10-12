@@ -55,7 +55,8 @@ val downloadSherpaOnnx = tasks.register("downloadSherpaOnnx") {
 }
 
 val discordSdkAar = layout.projectDirectory.file("libs/discord_partner_sdk.aar").asFile
-val hasDiscordSdk = discordSdkAar.isFile
+val streamer32Only = providers.gradleProperty("streamer32Only").orNull == "true"
+val hasDiscordSdk = discordSdkAar.isFile && !streamer32Only
 val includeX86Abis = providers.gradleProperty("includeX86Abis")
     .orNull
     ?.toBooleanStrictOrNull() == true
@@ -114,8 +115,9 @@ android {
         // emulator support with -PincludeX86Abis=true without changing this file.
         ndk {
             abiFilters += buildList {
-                addAll(listOf("armeabi-v7a", "arm64-v8a"))
-                if (includeX86Abis) {
+                add("armeabi-v7a")
+                if (!streamer32Only) add("arm64-v8a")
+                if (includeX86Abis && !streamer32Only) {
                     addAll(listOf("x86", "x86_64"))
                 }
             }
@@ -568,6 +570,13 @@ fun escapeBuildConfigString(value: String): String =
 
 val validateReleaseCloudSecrets = tasks.register("validateReleaseCloudSecrets") {
     doLast {
+        // Gradle configures release variants even for assembleSideloadDebug.
+        // Check release signing only when a release/staging build is requested.
+        if (streamer32Only) {
+            check(android.signingConfigs.getByName("release").storeFile?.isFile == true) {
+                "Streamer release requires keystore.properties and a real release keystore"
+            }
+        }
         val appAnonKey = localSecretValue("APP_ANON_KEY").ifBlank { localSecretValue("SUPABASE_ANON_KEY") }
         val supabaseUrl = localSecretValue("SUPABASE_URL")
         val traktClientId = localSecretValue("TRAKT_CLIENT_ID")
@@ -673,5 +682,6 @@ dependencies {
     add("sideloadImplementation", "org.mozilla:rhino:1.8.1")
     add("sideloadImplementation", "com.google.re2j:re2j:1.8")
 }
+
 
 
