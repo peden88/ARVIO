@@ -2922,7 +2922,9 @@ class PlayerViewModel @Inject constructor(
             episode = next.tmdbEpisode,
             imdbId = imdb,
         )
-        if (nextEpisodePrefetchKey == key) return
+        // Only suppress an already-running request. A completed empty or failed
+        // request must be eligible for retry if the user returns to the episode.
+        if (nextEpisodePrefetchKey == key && nextEpisodePrefetchJob?.isActive == true) return
         nextEpisodePrefetchJob?.cancel()
         nextEpisodePrefetchKey = key
         // A recent matching handoff is already available to the next player instance.
