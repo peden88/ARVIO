@@ -2948,7 +2948,9 @@ class PlayerViewModel @Inject constructor(
                 val addons = streamRepository.installedAddonsForSourceResolution()
                     .filter { it.isVodStreamingAddon() }
                 val streams = withTimeoutOrNull(12_000L) {
-                    coroutineScope {
+                    // Supervise addon requests individually: a failure from one provider
+                    // must not cancel successful results from the others.
+                    kotlinx.coroutines.supervisorScope {
                         addons.map { addon ->
                             async {
                                 try {
@@ -2978,8 +2980,6 @@ class PlayerViewModel @Inject constructor(
                         }.awaitAll().flatten()
                     }
                 }.orEmpty()
-                if (nextEpisodePrefetchKey != key ||
-                    profileManager.getProfileIdSync() != key.profileId) return@launch
                 val safeStreams = sanitizeNextEpisodePrefetchedStreams(streams)
                 // Cache only successful discoveries. Empty/invalid responses should not
                 // suppress a later retry when addons recover.
