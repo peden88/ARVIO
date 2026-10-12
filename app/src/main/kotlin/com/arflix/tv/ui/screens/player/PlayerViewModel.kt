@@ -2937,6 +2937,9 @@ class PlayerViewModel @Inject constructor(
         val prefetchTvdbId = currentTvdbId
         val prefetchGenreIds = currentGenreIds
         val prefetchLanguage = currentOriginalLanguage
+        val prefetchAutoplayQuality = autoPlayMinimumQuality
+        val prefetchAutoplayLimits = autoPlayLimits
+        val prefetchAudioLanguage = _uiState.value.preferredAudioLanguage
         nextEpisodePrefetchJob = viewModelScope.launch {
             try {
                 val addons = streamRepository.installedAddonsForSourceResolution()
@@ -2975,10 +2978,13 @@ class PlayerViewModel @Inject constructor(
                 if (nextEpisodePrefetchKey != key ||
                     profileManager.getProfileIdSync() != key.profileId) return@launch
                 val safeStreams = sanitizeNextEpisodePrefetchedStreams(streams)
+                // Cache only successful discoveries. Empty/invalid responses should not
+                // suppress a later retry when addons recover.
+                if (safeStreams.isEmpty()) return@launch
                 NextEpisodeStreamPrefetchStore.put(key, safeStreams)
                 val candidates = sortStreamsForAutoplay(
-                    eligiblePlayerAutoplayStreams(safeStreams, autoPlayMinimumQuality, autoPlayLimits),
-                    _uiState.value.preferredAudioLanguage
+                    eligiblePlayerAutoplayStreams(safeStreams, prefetchAutoplayQuality, prefetchAutoplayLimits),
+                    prefetchAudioLanguage
                 ).take(2)
                 if (candidates.isNotEmpty()) {
                     streamRepository.prewarmStreamsForPlayback(
