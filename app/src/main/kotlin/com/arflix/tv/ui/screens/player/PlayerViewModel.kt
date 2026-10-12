@@ -1589,7 +1589,7 @@ class PlayerViewModel @Inject constructor(
                     val existingVod = _uiState.value.streams.filter(::isSupplementalStream)
                     val activeStreamList = listOfNotNull(_uiState.value.selectedStream)
                     val mergedStreams = sortStreamsByQualityAndSize(
-                        (prefetchedEpisodeStreams + allStreams + existingVod + activeStreamList)
+                        (sanitizeNextEpisodePrefetchedStreams(prefetchedEpisodeStreams) + allStreams + existingVod + activeStreamList)
                             .distinctBy(::providerScopedStreamIdentity),
                         preferredLanguage
                     )
@@ -2958,7 +2958,7 @@ class PlayerViewModel @Inject constructor(
                 }.orEmpty()
                 if (nextEpisodePrefetchKey != key ||
                     profileManager.getProfileIdSync() != key.profileId) return@launch
-                NextEpisodeStreamPrefetchStore.put(key, streams)
+                NextEpisodeStreamPrefetchStore.put(key, sanitizeNextEpisodePrefetchedStreams(streams))
                 val candidates = sortStreamsForAutoplay(
                     eligiblePlayerAutoplayStreams(streams, autoPlayMinimumQuality, autoPlayLimits),
                     _uiState.value.preferredAudioLanguage
