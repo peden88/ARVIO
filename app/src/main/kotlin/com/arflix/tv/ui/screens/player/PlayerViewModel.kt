@@ -2992,6 +2992,10 @@ class PlayerViewModel @Inject constructor(
                     eligiblePlayerAutoplayStreams(safeStreams, prefetchAutoplayQuality, prefetchAutoplayLimits),
                     prefetchAudioLanguage
                 ).take(2)
+                // Publishing a handoff is sufficient even if warmup fails. Avoid warming
+                // an episode after navigation or a profile switch.
+                if (nextEpisodePrefetchKey != key ||
+                    profileManager.getProfileIdSync() != key.profileId) return@launch
                 if (candidates.isNotEmpty()) {
                     streamRepository.prewarmStreamsForPlayback(
                         streams = candidates,
