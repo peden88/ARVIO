@@ -88,6 +88,7 @@ fun ProgramCell(
     focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
+    val presentation = LocalLiveTvPreferences.current
     val deviceType = LocalDeviceType.current
     val isTouchDevice = deviceType.isTouchDevice()
     // Retain the standard layout for touch, expanded rows and RTL text layout.
@@ -101,7 +102,7 @@ fun ProgramCell(
     val currentOnClick by rememberUpdatedState(onClick)
     var focused by remember { mutableStateOf(false) }
     val baseBg = when {
-        isNow -> LiveColors.FocusBg
+        isNow && presentation.highlightCurrentProgrammes -> LiveColors.FocusBg
         else -> LiveColors.Panel
     }
     val bg = if (focused) Color.White else baseBg
@@ -182,7 +183,7 @@ fun ProgramCell(
                     AnnotatedString(formatClock(program.startUtcMillis)),
                     program.description?.takeIf { it.isNotBlank() }?.let(::AnnotatedString),
                 )
-                if (isNow || (isPast && isCatchupSupported)) {
+                if (!isPast || isCatchupSupported) {
                     onClick {
                         currentOnClick()
                         true
@@ -224,7 +225,7 @@ fun ProgramCell(
                 Text(
                     text = program.title,
                     style = LiveType.CellTitle.copy(color = foreground, fontSize = 10.sp, lineHeight = 12.sp),
-                    maxLines = if (width < 120.dp) 2 else 1,
+                    maxLines = if (presentation.twoLineProgrammes || width < 120.dp) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
@@ -237,7 +238,7 @@ fun ProgramCell(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (width >= 120.dp) Row(
+            if (width >= 120.dp && !(presentation.twoLineProgrammes && rowHeight < 44.dp)) Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {

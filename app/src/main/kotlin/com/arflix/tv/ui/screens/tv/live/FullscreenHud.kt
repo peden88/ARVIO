@@ -123,6 +123,7 @@ fun FullscreenHud(
     showControls: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    val panelTimeoutMs = LocalLiveTvPreferences.current.panelTimeoutSeconds * 1_000L
     var visible by remember { mutableStateOf(true) }
     var lastPoke by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val touchControls = LocalDeviceType.current.isTouchDevice()
@@ -140,13 +141,13 @@ fun FullscreenHud(
         }
     }
 
-    LaunchedEffect(pokeSignal, scrubbing) {
+    LaunchedEffect(pokeSignal, scrubbing, panelTimeoutMs) {
         visible = true
         onVisibilityChanged?.invoke(true)
         lastPoke = System.currentTimeMillis()
         if (scrubbing) return@LaunchedEffect
-        delay(5_000)
-        if (System.currentTimeMillis() - lastPoke >= 5_000) {
+        delay(panelTimeoutMs)
+        if (System.currentTimeMillis() - lastPoke >= panelTimeoutMs) {
             visible = false
             onVisibilityChanged?.invoke(false)
         }

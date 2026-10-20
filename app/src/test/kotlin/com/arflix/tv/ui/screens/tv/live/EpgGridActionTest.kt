@@ -25,7 +25,7 @@ class EpgGridActionTest {
     }
 
     @Test
-    fun futureProgramDoesNotLeaveGuideUntilRecordingOrReminderExists() {
+    fun futureProgramKeepsMetadataForDetailsWithoutStartingPlayback() {
         val program = IptvProgram(
             title = "Tomorrow's Movie",
             startUtcMillis = 3_000L,
@@ -39,6 +39,6 @@ class EpgGridActionTest {
                 isLive = false,
                 isCatchupSupported = false,
             )
-        ).isNull()
+        ).isEqualTo(program)
     }
 }

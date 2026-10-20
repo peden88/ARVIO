@@ -96,6 +96,7 @@ fun ChannelRow(
     showChannelNumber: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    val presentation = LocalLiveTvPreferences.current
     var focused by remember { mutableStateOf(false) }
     val visuallyFocused = focused || forceFocused
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
@@ -246,9 +247,9 @@ fun ChannelRow(
                         fontSize = 11.sp,
                         lineHeight = 13.sp,
                     ),
-                    maxLines = 1,
+                    maxLines = if (presentation.twoLineChannels) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).then(if (visuallyFocused) Modifier.basicMarquee(
+                    modifier = Modifier.weight(1f, fill = false).then(if (visuallyFocused && !presentation.twoLineChannels) Modifier.basicMarquee(
                         iterations = Int.MAX_VALUE, initialDelayMillis = 1000,
                     ) else Modifier),
                 )

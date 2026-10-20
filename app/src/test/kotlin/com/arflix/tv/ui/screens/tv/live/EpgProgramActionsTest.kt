@@ -266,7 +266,7 @@ class EpgProgramActionsTest {
     }
 
     @Test
-    fun futureEpgCellDoesNothingUntilRecordingOrReminderExists() {
+    fun futureEpgCellShowsInformationWithoutTuning() {
         assertThat(
             epgProgramInteractionAction(
                 temporalState = EpgTemporalState.Future,
@@ -274,7 +274,7 @@ class EpgProgramActionsTest {
                 isCatchupSupported = false,
                 vodActionsEnabled = true,
             )
-        ).isEqualTo(EpgInteractionAction.NoOp)
+        ).isEqualTo(EpgInteractionAction.ShowProgramInfo)
     }
 
     @Test

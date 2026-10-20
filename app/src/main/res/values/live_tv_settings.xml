@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="live_settings_title">Live TV settings</string>
+    <string name="live_settings_close">Close</string>
+    <string name="live_settings_guide">TV guide</string>
+    <string name="live_settings_player">Player</string>
+    <string name="live_settings_rows">Visible guide rows</string>
+    <string name="live_settings_existing">Existing setting</string>
+    <string name="live_settings_timeline">Timeline width</string>
+    <string name="live_settings_numbers">Channel numbers</string>
+    <string name="live_settings_channel_lines">Two-line channel names</string>
+    <string name="live_settings_programme_lines">Two-line programme titles</string>
+    <string name="live_settings_highlight">Highlight current programmes</string>
+    <string name="live_settings_now_line">Current time line</string>
+    <string name="live_settings_accent">Guide accent</string>
+    <string name="live_settings_blue">Blue</string>
+    <string name="live_settings_teal">Teal</string>
+    <string name="live_settings_app_accent">App colour</string>
+    <string name="live_settings_preview">Video preview in guide</string>
+    <string name="live_settings_fullscreen">Open channels fullscreen on first press</string>
+    <string name="live_settings_timeout">Player panel timeout</string>
+    <string name="live_settings_seconds">%1$d seconds</string>
+    <string name="live_settings_sources">Playlists and sources</string>
+    <string name="live_settings_refresh">Refresh programme guide</string>
+    <string name="live_settings_classic">Apply Classic TV layout</string>
+    <string name="live_settings_reset">Reset Live TV presentation</string>
+    <string name="live_settings_app">All app settings</string>
+    <string name="live_settings_on">On</string>
+    <string name="live_settings_off">Off</string>
+    <string name="live_settings_save_failed">Could not save this change. Please try again.</string>
+    <string name="live_programme_upcoming">This programme has not started yet.</string>
+    <string name="live_programme_on_now">This programme is on now.</string>
+    <string name="live_programme_no_archive">Replay is not available for this programme.</string>
+    <string name="live_programme_no_description">No description provided.</string>
+    <string name="live_programme_watch_channel">Watch channel live</string>
+</resources>

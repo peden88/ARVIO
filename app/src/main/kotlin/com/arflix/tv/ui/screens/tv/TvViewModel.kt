@@ -3,6 +3,11 @@ package com.arflix.tv.ui.screens.tv
 import com.arflix.tv.network.withIptvProviderRequestGuard
 
 import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import com.arflix.tv.data.model.LiveTvPreferences
+import kotlinx.coroutines.flow.catch
+import java.io.IOException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.arflix.tv.R
@@ -124,6 +129,33 @@ class TvViewModel @Inject constructor(
     val sportsAddons: com.arflix.tv.data.repository.SportsAddonRepository,
     private val profileManager: com.arflix.tv.data.repository.ProfileManager,
 ) : ViewModel() {
+
+    val liveTvSettingsProfileId: String get() = profileManager.getProfileIdSync()
+    private val _liveSettingsSaveError = MutableStateFlow(false)
+    val liveSettingsSaveError: StateFlow<Boolean> = _liveSettingsSaveError.asStateFlow()
+
+    fun liveTvPreferences(profileId: String) = context.settingsDataStore.data
+        .catch { error -> if (error is IOException) emit(emptyPreferences()) else throw error }
+        .map { prefs ->
+            LiveTvPreferences.decode(prefs[profileManager.profileStringKeyFor(profileId, LiveTvPreferences.PREFERENCE_KEY)])
+        }.distinctUntilChanged()
+
+    /** Capture the requesting profile before launching, then transform atomically. */
+    fun updateLiveTvPreferences(profileId: String, transform: (LiveTvPreferences) -> LiveTvPreferences) {
+        viewModelScope.launch {
+            try {
+                val key = profileManager.profileStringKeyFor(profileId, LiveTvPreferences.PREFERENCE_KEY)
+                context.settingsDataStore.edit { prefs ->
+                    prefs[key] = transform(LiveTvPreferences.decode(prefs[key])).normalized().encode()
+                }
+                _liveSettingsSaveError.value = false
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IOException) {
+                _liveSettingsSaveError.value = true
+            }
+        }
+    }
 
     suspend fun loadSportsGuideArtwork() = sportsRepository.loadGuideArtwork()
     suspend fun cachedSportsMetadata() = sportsRepository.cachedMetadata()

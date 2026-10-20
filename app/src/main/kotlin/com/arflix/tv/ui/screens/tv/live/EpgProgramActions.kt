@@ -60,6 +60,7 @@ internal enum class EpgInteractionAction {
     PlayCatchup,
     ResolveVodOrPlayFullscreen,
     ShowVodDialog,
+    ShowProgramInfo,
     NoOp,
 }
 
@@ -83,7 +84,9 @@ internal suspend fun awaitLiveEpgProgram(
 
 internal fun channelRowInteractionAction(
     isSamePlayingChannel: Boolean,
+    directFullscreen: Boolean = false,
 ): EpgInteractionAction = when {
+    directFullscreen -> EpgInteractionAction.PlayLiveFullscreen
     !isSamePlayingChannel -> EpgInteractionAction.PlayLiveMini
     else -> EpgInteractionAction.PlayLiveFullscreen
 }
@@ -93,14 +96,16 @@ internal fun epgProgramInteractionAction(
     isSamePlayingChannel: Boolean,
     isCatchupSupported: Boolean,
     vodActionsEnabled: Boolean,
+    directFullscreen: Boolean = false,
 ): EpgInteractionAction = when (temporalState) {
     EpgTemporalState.Past -> if (isCatchupSupported) {
         EpgInteractionAction.PlayCatchup
     } else {
         EpgInteractionAction.NoOp
     }
-    EpgTemporalState.Future -> EpgInteractionAction.NoOp
+    EpgTemporalState.Future -> EpgInteractionAction.ShowProgramInfo
     EpgTemporalState.Live -> when {
+        directFullscreen -> EpgInteractionAction.PlayLiveFullscreen
         !isSamePlayingChannel -> EpgInteractionAction.PlayLiveMini
         vodActionsEnabled -> EpgInteractionAction.ResolveVodOrPlayFullscreen
         else -> EpgInteractionAction.PlayLiveFullscreen

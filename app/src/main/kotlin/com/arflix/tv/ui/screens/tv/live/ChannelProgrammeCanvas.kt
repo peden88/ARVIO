@@ -39,6 +39,7 @@ internal fun ChannelProgrammeCanvas(
     onClick: () -> Unit,
     modifier: Modifier,
 ) {
+    val presentation = LocalLiveTvPreferences.current
     val measurer = rememberTextMeasurer(cacheSize = 4)
     val time = formatClock(program.startUtcMillis)
     val minutes = ((program.endUtcMillis - program.startUtcMillis) / 60_000L).coerceAtLeast(0)
@@ -54,7 +55,7 @@ internal fun ChannelProgrammeCanvas(
                 AnnotatedString(program.title), AnnotatedString(time),
                 program.description?.takeIf { it.isNotBlank() }?.let(::AnnotatedString),
             )
-            if (isNow || (isPast && isCatchupSupported)) onClick { onClick(); true }
+            if (!isPast || isCatchupSupported) onClick { onClick(); true }
         }
         .drawWithCache {
             val x = 7.dp.toPx() + contentStartOffsetPx()
@@ -68,9 +69,9 @@ internal fun ChannelProgrammeCanvas(
             val titleX = if (badgeLayout != null) badgeWidth + 6.dp.toPx() else 0f
             val title = measurer.measure(program.title,
                 LiveType.CellTitle.copy(color = titleColor, fontSize = 10.sp, lineHeight = 12.sp),
-                overflow = TextOverflow.Ellipsis, maxLines = if (width < 120.dp) 2 else 1,
+                overflow = TextOverflow.Ellipsis, maxLines = if (presentation.twoLineProgrammes || width < 120.dp) 2 else 1,
                 constraints = Constraints(maxWidth = (available - titleX).toInt().coerceAtLeast(1)))
-            val footer = if (width >= 120.dp) measurer.measure(
+            val footer = if (width >= 120.dp && !(presentation.twoLineProgrammes && rowHeight < 44.dp)) measurer.measure(
                 "$time - ${formatClock(program.endUtcMillis)}",
                 LiveType.TimeMono.copy(color = LiveColors.FgDim, fontSize = 8.sp, lineHeight = 10.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -79,7 +80,7 @@ internal fun ChannelProgrammeCanvas(
                 val origin = Offset(1.dp.toPx(), 1.dp.toPx())
                 val cellSize = Size((size.width - 2.dp.toPx()).coerceAtLeast(0f), (size.height - 2.dp.toPx()).coerceAtLeast(0f))
                 val radius = CornerRadius(LiveDims.CellRadius.toPx())
-                drawRoundRect(if (isNow) LiveColors.FocusBg else LiveColors.Panel, origin, cellSize, radius)
+                drawRoundRect(if (isNow && presentation.highlightCurrentProgrammes) LiveColors.FocusBg else LiveColors.Panel, origin, cellSize, radius)
                 if (badgeLayout != null) {
                     drawRoundRect(LiveColors.PanelRaised,
                         Offset(x, 5.dp.toPx()), Size(badgeWidth, badgeLayout.size.height + 1.dp.toPx()), CornerRadius(3.dp.toPx()))
