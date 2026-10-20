@@ -148,6 +148,7 @@ fun MiniPlayerRow(
     focusedProgrammeProvider: (() -> Pair<EnrichedChannel, IptvProgram>?)? = null,
     focusedChannelProvider: (() -> Pair<EnrichedChannel, IptvNowNext?>?)? = null,
 ) {
+    val presentation = LocalLiveTvPreferences.current
     val drawerTranslation = LocalLiveDrawerTranslation.current
     // Read rapidly changing programme focus here, not in the surrounding guide.
     val displayedProgramme = focusedProgrammeProvider?.invoke() ?: focusedProgramme
@@ -159,7 +160,10 @@ fun MiniPlayerRow(
     val infoVariantCount = if (infoChannel?.id == channel?.id) variantCount else 1
     val onInfoVariants = onOpenVariants.takeIf { infoChannel?.id == channel?.id }
     val drawerDirection = if (LocalLayoutDirection.current == LayoutDirection.Rtl) 1f else -1f
-    if (landscapeCompact) {
+    if (!compact && !landscapeCompact && !presentation.showPreview) {
+        GuideProgrammeSummary(infoChannel, displayedProgramme?.second ?: infoNowNext?.now,
+            modifier.fillMaxWidth().height(112.dp).padding(horizontal = 18.dp, vertical = 4.dp))
+    } else if (landscapeCompact) {
         val spec = landscapePhoneMiniPlayerSpec()
         Row(
             modifier = modifier

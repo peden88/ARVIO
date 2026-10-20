@@ -66,6 +66,9 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.sp
 import com.arflix.tv.ui.theme.TextPrimary
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import com.arflix.tv.data.model.LiveTvPreferences
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -576,6 +579,15 @@ fun LiveTvScreen(
     val useTouchRail = isTouchDevice && configuration.smallestScreenWidthDp < 600
     val showTopBar = !isTouchDevice
     val contentTopPadding = if (showTopBar) LiveDims.ContentTopInset else 0.dp
+    val settingsProfileId = currentProfile?.id ?: viewModel.liveTvSettingsProfileId
+    val savedLivePreferences by key(settingsProfileId) {
+        remember(settingsProfileId) { viewModel.liveTvPreferences(settingsProfileId) }
+            .collectAsStateWithLifecycle(initialValue = LiveTvPreferences())
+    }
+    val livePreferences = if (isTouchDevice) LiveTvPreferences() else savedLivePreferences
+    val liveSettingsSaveError by viewModel.liveSettingsSaveError.collectAsStateWithLifecycle()
+    var liveSettingsOpen by rememberSaveable(settingsProfileId) { mutableStateOf(false) }
+    var programmeDetails by remember(settingsProfileId) { mutableStateOf<Pair<EnrichedChannel, IptvProgram>?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val guideClockMillis by produceState(initialValue = System.currentTimeMillis()) {
         while (true) {
@@ -2895,10 +2907,12 @@ fun LiveTvScreen(
         when (
             channelRowInteractionAction(
                 isSamePlayingChannel = sameChannel,
+                directFullscreen = livePreferences.tuneFullscreen,
             )
         ) {
             EpgInteractionAction.PlayLiveMini -> playProgramInMini(channel, null)
             EpgInteractionAction.PlayLiveFullscreen -> {
+                if (!sameChannel) playProgramInMini(channel, null)
                 // Expand the existing session, including a selected quality variant
                 // or buffering stream, without another guide lookup or retune.
                 invalidateProgramActionLookup()
@@ -2924,6 +2938,7 @@ fun LiveTvScreen(
                 isSamePlayingChannel = isSamePlayingChannel(channel),
                 isCatchupSupported = catchupSupported,
                 vodActionsEnabled = state.epgVodActionsEnabled,
+                directFullscreen = livePreferences.tuneFullscreen,
             )
         ) {
             EpgInteractionAction.PlayLiveMini -> playProgramInMini(channel, null)
@@ -2933,6 +2948,7 @@ fun LiveTvScreen(
             }
             EpgInteractionAction.ResolveVodOrPlayFullscreen -> resolveVodOrPlayFullscreen(channel, program)
             EpgInteractionAction.PlayLiveFullscreen -> playLiveFullscreen(channel)
+            EpgInteractionAction.ShowProgramInfo -> { programmeDetails = channel to program }
             EpgInteractionAction.NoOp,
             EpgInteractionAction.ShowVodDialog -> Unit
         }
@@ -3734,6 +3750,7 @@ fun LiveTvScreen(
         }
     }
 
+    CompositionLocalProvider(LocalLiveTvPreferences provides livePreferences) {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -3873,7 +3890,7 @@ fun LiveTvScreen(
                                                 SidebarItem.HOME -> onNavigateToHome()
                                                 SidebarItem.WATCHLIST -> onNavigateToWatchlist()
                                                 SidebarItem.TV -> Unit
-                                                SidebarItem.SETTINGS -> onNavigateToSettings()
+                                                SidebarItem.SETTINGS -> { liveSettingsOpen = true }
                                                 null -> Unit
                                             }
                                         }
@@ -4319,7 +4336,7 @@ fun LiveTvScreen(
                         },
                         scrollResetKey = filteredChannelsScopeKey,
                         compact = compactTouchLayout,
-                        rowCount = guideRowCount,
+                        rowCount = livePreferences.guideRows.takeIf { it != 0 } ?: guideRowCount,
                         gridFocused = focusZone == LiveTvFocusZone.CHANNEL_LIST || focusZone == LiveTvFocusZone.EPG,
                         backHandlingEnabled = channelMenu == null && !searchOpen && variantPickerChannel == null,
                         onChannelSelect = { channel ->
@@ -4973,6 +4990,35 @@ fun LiveTvScreen(
             )
         }
 
+        if (liveSettingsOpen && !isTouchDevice) {
+            LiveTvSettingsSheet(
+                preferences = livePreferences,
+                saveError = liveSettingsSaveError,
+                onChange = { transform -> viewModel.updateLiveTvPreferences(settingsProfileId, transform) },
+                onManageSources = {
+                    liveSettingsOpen = false
+                    (onNavigateToIptvSettings ?: onNavigateToSettings)()
+                },
+                onRefreshGuide = {
+                    liveSettingsOpen = false
+                    viewModel.refresh(force = false, showLoading = false, forceEpg = true)
+                },
+                onAppSettings = { liveSettingsOpen = false; onNavigateToSettings() },
+                onDismiss = { liveSettingsOpen = false },
+            )
+        }
+        programmeDetails?.let { (channel, programme) ->
+            LiveProgrammeDetailsSheet(
+                channelName = channel.name,
+                program = programme,
+                nowMillis = guideClockMillis,
+                favorite = channel.id in favSet,
+                onWatchLive = { programmeDetails = null; playLiveFullscreen(channel) },
+                onToggleFavorite = { viewModel.toggleFavoriteChannel(channel.id) },
+                onDismiss = { programmeDetails = null },
+            )
+        }
+
         val lockedAction = pendingLockedGroupAction
         if (lockedAction != null) {
             PinEntryDialog(
@@ -5046,6 +5092,7 @@ fun LiveTvScreen(
             )
             }
         }
+    }
     }
 }
 

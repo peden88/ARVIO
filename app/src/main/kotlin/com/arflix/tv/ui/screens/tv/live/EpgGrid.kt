@@ -168,7 +168,8 @@ fun EpgGrid(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
-    val pxPerMin = if (compact) 96f / 30f else LiveDims.EpgPxPerMinute.toFloat()
+    val presentation = LocalLiveTvPreferences.current
+    val pxPerMin = (if (compact) 96f / 30f else LiveDims.EpgPxPerMinute.toFloat()) * presentation.timelineScale / 100f
     val selectedChannelFocusRequester = remember { FocusRequester() }
     val firstChannelFocusRequester = remember { FocusRequester() }
     val headerHeight = if (compact) 32.dp else 28.dp
@@ -465,7 +466,7 @@ fun EpgGrid(
         handledEpgFocusSignal = focusEpgSignal
     }
 
-    LaunchedEffect(windowStartMillis, compact) {
+    LaunchedEffect(windowStartMillis, compact, pxPerMin) {
         repeat(20) { attempt ->
             with(density) {
                 val nowOffsetMin = ((clockTickMillis - windowStartMillis) / 60_000L).toInt()
@@ -839,7 +840,7 @@ fun EpgGrid(
                                 nowNext = rowGuide,
                                 isFavorite = ch.id in favorites,
                                 stripe = idx % 2 == 1,
-                                showChannelNumber = !compact,
+                                showChannelNumber = !compact && presentation.showChannelNumbers,
                                 onClick = { onChannelSelect(ch) },
                                 onFocused = {
                                     val pendingId = pendingChannelFocusId
@@ -988,7 +989,7 @@ fun EpgGrid(
                 val nowLineColor = liveAccent()
                 // Read scrolling in the drawing phase, not the whole guide composition.
                 Canvas(Modifier.fillMaxSize()) {
-                    if (channels.isNotEmpty() && clockTickMillis in windowStartMillis until windowEndMillis) {
+                    if (presentation.showNowLine && channels.isNotEmpty() && clockTickMillis in windowStartMillis until windowEndMillis) {
                         val nowMin = ((clockTickMillis - windowStartMillis) / 60_000L).toInt()
                         val inside = (nowMin * pxPerMin).dp.toPx() - hScroll.value
                         val x = (channelColumnWidth + 1.dp).toPx() + inside
@@ -1143,7 +1144,7 @@ private fun ProgramsRow(
                             (hScrollOffsetPx() - cellOffsetPx).coerceIn(0f, maxShiftPx).toInt()
                         },
                         onClick = {
-                            epgProgramActionTarget(
+                            if (!placement.isPlaceholder) epgProgramActionTarget(
                                 program = placement.program,
                                 isPast = placementIsPast,
                                 isLive = placementIsNow,
@@ -1282,6 +1283,7 @@ internal fun epgProgramActionTarget(
 ): IptvProgram? = when {
     isPast && isCatchupSupported -> program
     isLive -> program
+    !isPast -> program
     else -> null
 }
 

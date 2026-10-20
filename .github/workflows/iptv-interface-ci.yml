@@ -1,0 +1,89 @@
+name: IPTV interface debug APK
+
+on:
+  push:
+    branches: ['feature/tivimate-iptv']
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'secrets.defaults.properties'
+      - '.github/workflows/iptv-interface-ci.yml'
+  pull_request:
+    branches: ['ARVIO/tweaks']
+    paths:
+      - 'app/**'
+      - '.github/workflows/iptv-interface-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iptv-interface-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Prepare debug configuration
+        run: |
+          cp secrets.defaults.properties secrets.properties
+          test -d "$ANDROID_HOME"
+      - name: Build Streamer APK and run unit tests
+        run: >-
+          bash ./gradlew :app:assembleSideloadDebug :app:testSideloadDebugUnitTest
+          -Pstreamer32Only=true --stacktrace --no-daemon
+      - name: Verify and package APK
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import shutil
+          import subprocess
+          import zipfile
+          apks = list(Path('app/build/outputs/apk/sideload/debug').glob('*.apk'))
+          if len(apks) != 1:
+              raise SystemExit(f'Expected one APK, found {len(apks)}')
+          with zipfile.ZipFile(apks[0]) as apk:
+              libraries = [n for n in apk.namelist() if n.startswith('lib/') and n.endswith('.so')]
+              abis = {n.split('/')[1] for n in libraries}
+              if abis != {'armeabi-v7a'}:
+                  raise SystemExit(f'Unexpected ABIs: {sorted(abis)}')
+              if any('discord' in n.lower() for n in libraries):
+                  raise SystemExit('Unexpected Discord native library')
+          out = Path('artifacts')
+          out.mkdir(exist_ok=True)
+          target = out / 'ARVIO-IPTV-Streamer-32bit-debug.apk'
+          shutil.copy2(apks[0], target)
+          digest = hashlib.sha256(target.read_bytes()).hexdigest()
+          (out / 'SHA256SUMS.txt').write_text(digest + '  ' + target.name + '\n')
+          (out / 'source-commit.txt').write_text(subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True))
+          PY
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          "$build_tools/apksigner" verify --verbose artifacts/ARVIO-IPTV-Streamer-32bit-debug.apk
+          "$build_tools/aapt" dump badging artifacts/ARVIO-IPTV-Streamer-32bit-debug.apk > artifacts/apk-info.txt
+          grep '^application-debuggable' artifacts/apk-info.txt
+      - name: Upload APK and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARVIO-IPTV-Streamer-debug-${{ github.run_id }}
+          path: |
+            artifacts/
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: warn
+          retention-days: 14
