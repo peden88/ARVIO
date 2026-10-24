@@ -703,7 +703,8 @@ fun PlayerScreen(
     val bufferingTimeoutMs = 25_000L // Mid-playback timeout for stuck buffering
     var userSelectedSourceManually by remember { mutableStateOf(false) }
     val allowStartupSourceFallback = true
-    val allowMidPlaybackSourceFallback = false
+    // Only VOD can switch sources mid-playback; live channels have different timelines.
+    val allowMidPlaybackSourceFallback = !isLiveStream
     val initialBufferingTimeoutMs = remember(uiState.selectedStream, userSelectedSourceManually) {
         estimateInitialStartupTimeoutMs(
             stream = uiState.selectedStream,
@@ -905,6 +906,7 @@ fun PlayerScreen(
     fun tryAdvanceToNextStream(
         skipAddonId: String? = null,
         recordCurrentFailure: Boolean = true,
+        resumePositionMs: Long? = null,
         reason: String = context.getString(R.string.player_fail_source_didnt_start)
     ): Boolean {
         val streams = uiState.streams
@@ -961,7 +963,13 @@ fun PlayerScreen(
                 rebufferRecoverAttempted = false
                 longRebufferCount = 0
                 isAutoAdvancing = true
-                viewModel.selectStream(streams[nextIndex])
+                // Preserve the VOD timeline when recovery moves away from a source that
+                // already played successfully. Startup failover still uses the original start.
+                if (hasPlaybackStarted && !isLiveStream) {
+                    viewModel.selectStream(streams[nextIndex], (resumePositionMs ?: 0L).coerceAtLeast(0L))
+                } else {
+                    viewModel.selectStream(streams[nextIndex])
+                }
                 true
             }
         }
@@ -1334,6 +1342,19 @@ fun PlayerScreen(
                                     seekTo(pos)
                                 }
                                 playWhenReady = wasPlaying
+                                return
+                            }
+                            // Once the bounded same-source retry ladder is exhausted, switch
+                            // only VOD autoplay sources. Preserve the current position via
+                            // tryAdvanceToNextStream; never switch live or manual selections.
+                            if (isTransientError &&
+                                allowMidPlaybackSourceFallback &&
+                                !userSelectedSourceManually &&
+                                tryAdvanceToNextStream(
+                                    resumePositionMs = currentPosition,
+                                    reason = classifyPlaybackFailure(context, error)
+                                )
+                            ) {
                                 return
                             }
                         }
@@ -1920,6 +1941,23 @@ fun PlayerScreen(
             onExitPlayer()
         }
     }
+    // Arm next-episode prefetch timing without mutating current-episode stream state.
+    val nextEpisodePrefetchEligible = shouldStartNextEpisodePrefetch(
+        positionMs = currentPosition,
+        durationMs = duration,
+        isLive = isLiveStream,
+        hasPlaybackStarted = hasPlaybackStarted,
+        hasPlaybackError = uiState.error != null,
+        autoPlayNextEpisode = uiState.autoPlayNext,
+        nextEpisodeAvailable = nextEpisodeIdentity != null &&
+            nextEpisodeAirDateResolution == NextEpisodeAirDateResolution.Allowed,
+        isCasting = isCasting,
+    )
+    LaunchedEffect(playbackEpisodeKey, nextEpisodePrefetchEligible) {
+        if (nextEpisodePrefetchEligible) {
+            nextEpisodeIdentity?.let(viewModel::prefetchNextEpisodeStreams)
+        }
+    }
     PlayerCompletionEffect(
         ended = currentPlaybackState == Player.STATE_ENDED,
         enabled = hasPlaybackStarted && !isLiveStream && !isCasting,
@@ -2288,6 +2326,8 @@ fun PlayerScreen(
             playbackIssueReported = false
             rebufferRecoverAttempted = false
             longRebufferCount = 0
+            // Retry budget belongs to the source, not the whole playback session.
+            midPlaybackRecoveryAttempts = 0
             ArflixApplication.trimImageMemory()
 
             val streamHeaders = uiState.selectedStream
@@ -2827,8 +2867,11 @@ fun PlayerScreen(
                         viewModel.onLongRebufferDetected()
                         if (allowMidPlaybackSourceFallback &&
                             !userSelectedSourceManually &&
-                            longRebufferCount >= 1 &&
+                            // Give the existing same-source rebuffer recovery one full window
+                            // before attempting an automatic source change.
+                            rebufferRecoverAttempted && longRebufferCount >= 2 &&
                             tryAdvanceToNextStream(
+                                resumePositionMs = exoPlayer.currentPosition,
                                 reason = context.getString(R.string.player_fail_buffering_slow)
                             )
                         ) {
@@ -7037,14 +7080,17 @@ private class PlaybackCookieJar : CookieJar {
         val current = cookiesByHost[host]?.toMutableList() ?: mutableListOf()
         val now = System.currentTimeMillis()
 
+        current.removeAll { it.expiresAt <= now }
+
         cookies.forEach { cookie ->
-            if (cookie.expiresAt <= now) return@forEach
-            current.removeAll { existing ->
-                existing.name == cookie.name &&
-                    existing.domain == cookie.domain &&
-                    existing.path == cookie.path
+            if (cookie.expiresAt > now) {
+                current.removeAll { existing ->
+                    existing.name == cookie.name &&
+                        existing.domain == cookie.domain &&
+                        existing.path == cookie.path
+                }
+                current.add(cookie)
             }
-            current.add(cookie)
         }
 
         if (current.isEmpty()) {
@@ -7058,15 +7104,15 @@ private class PlaybackCookieJar : CookieJar {
         val host = url.host
         val now = System.currentTimeMillis()
         val list = cookiesByHost[host]?.toMutableList() ?: return emptyList()
-        val valid = list.filter { cookie -> cookie.expiresAt > now && cookie.matches(url) }
-        if (valid.size != list.size) {
-            if (valid.isEmpty()) {
+        val unexpired = list.filter { it.expiresAt > now }
+        if (unexpired.size != list.size) {
+            if (unexpired.isEmpty()) {
                 cookiesByHost.remove(host)
             } else {
-                cookiesByHost[host] = valid.toMutableList()
+                cookiesByHost[host] = unexpired.toMutableList()
             }
         }
-        return valid
+        return unexpired.filter { it.matches(url) }
     }
 }
 

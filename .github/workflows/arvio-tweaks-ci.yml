@@ -1,0 +1,42 @@
+name: ARVIO Tweaks Android CI
+
+on:
+  push:
+    branches:
+      - 'ARVIO/tweaks'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      # GitHub's Ubuntu Android runner already supplies the Android SDK.
+      # setup-android@v3 currently requests the retired SDK 'tools' package.
+      - name: Verify Android SDK
+        run: |
+          test -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager" --version || true
+      - name: Gradle build and unit tests
+        run: bash ./gradlew :app:assembleSideloadDebug :app:testSideloadDebugUnitTest --stacktrace --no-daemon
+      - name: Upload test APK and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arvio-tweaks-debug
+          path: |
+            app/build/outputs/apk/sideload/debug/*.apk
+            app/build/reports/tests/
+          if-no-files-found: warn
